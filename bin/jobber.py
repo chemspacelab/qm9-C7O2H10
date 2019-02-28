@@ -2,12 +2,45 @@ import itertools
 import numpy as np
 import json
 
+import scipy.special as scs
+
 import multiprocessing as mp
+
+
+def group_cost(combinations):
+    cost = 0
+    for case in combinations:
+        cost += np.prod([configuration_count(c) for c in case])
+
+    return cost
+
+
+def combinations_in_group(T, R):
+    combinations = []
+    for case in itertools.product(range(R+1), repeat=T):
+        if R in case:
+            combinations.append(case)
+    return combinations
+
+
+def configuration_count(resolution):
+    if resolution == 0:
+        return 1
+    return 2**(resolution - 1)
+
+
+def costfunc(r, t):
+    rest = range(0, r+1)
+    combinations = itertools.product(rest, repeat=t)
+    combinations = list(combinations)
+    combinations = [list(x) for x in combinations if r in x]
+    return len(combinations)
 
 
 def make_job(molidx, line, torsion_bodies, torsion_resolutions, perworkpackage=3000):
 
-    print(molidx)
+    # if molidx != 6091: return
+    # if molidx != 0: return
 
     line = line.strip().split()
 
@@ -16,8 +49,21 @@ def make_job(molidx, line, torsion_bodies, torsion_resolutions, perworkpackage=3
 
     torsion_idx = list(range(N_torsions))
 
-    resolutions = range(torsion_resolutions+1)
-    resolutions = list(resolutions)
+    # guido cost func
+    costmatrix = np.zeros((len(torsion_resolutions), len(torsion_bodies)), dtype=int)
+
+    for i, R in enumerate(torsion_resolutions):
+        for j, T in enumerate(torsion_bodies):
+
+            cost = costfunc(R, T)
+
+            cost = float(cost)
+            cost = int(cost)
+
+            costmatrix[i,j] = cost
+
+    # resolutions = range(torsion_resolutions+1)
+    # resolutions = list(resolutions)
 
     total = 0
 
@@ -25,22 +71,23 @@ def make_job(molidx, line, torsion_bodies, torsion_resolutions, perworkpackage=3
 
     jobs = []
 
-    for body in range(1, torsion_bodies+1):
+    for ib, body in enumerate(torsion_bodies):
 
         combinations = itertools.combinations(torsion_idx, body)
 
         for combination in combinations:
 
-            resiter = itertools.product(resolutions, repeat=body)
+            combination = [str(x) for x in combination]
+            combination = " ".join(combination)
 
-            for reslist in resiter:
+            for ir, resolution in enumerate(torsion_resolutions):
 
-                N = [max(2**(r-1), 1) for r in reslist]
-                N = np.prod(N)
-                jobstr = " ".join([str(x) for x in [molidx, ",", *combination, ",", *reslist, ",", N]])
+                cost = costmatrix[ir, ib]
 
-                jobs.append(jobstr + "\n")
-                total += N
+                job = [str(molidx), combination, str(resolution), str(cost)]
+                job = ",".join(job)
+
+                jobs.append(job)
 
 
     # wrap jobs in workpackages
@@ -53,21 +100,25 @@ def make_job(molidx, line, torsion_bodies, torsion_resolutions, perworkpackage=3
 
         line = line.strip()
         info = line.split(",")
-        N = info[-1]
-        N = int(N)
 
-        counter += N
+        cost = info[-1]
+        cost = int(cost)
+
+        counter += cost
+        # current += [",".join(info[:-1])]
         current += [line]
 
         if counter > perworkpackage:
 
-            workpackages.append(current)
+            workpackages.append(";".join(current))
 
             counter = 0
             current = []
 
 
-    workpackages = workpackages.__repr__()
+    workpackages.append(";".join(current))
+
+    workpackages = "\n".join(workpackages)
 
     fjob.write(workpackages)
 
@@ -80,8 +131,8 @@ def main():
 
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('-b', '--torsion-bodies', type=int, help='', metavar='N', default=2)
-    parser.add_argument('-r', '--torsion-resolutions', type=int, help='', metavar='N', default=2)
+    parser.add_argument('-b', '--torsion-bodies', nargs="+", type=int, help='', metavar='N', default=[2])
+    parser.add_argument('-r', '--torsion-resolutions', nargs="+", type=int, help='', metavar='N', default=[2])
     parser.add_argument('-j', '--workers', type=int, help='', metavar='N', default=1)
     args = parser.parse_args()
 
